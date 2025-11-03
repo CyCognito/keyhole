@@ -85,12 +85,12 @@ func GetAllServerURIs(shards []Shard, connString connstring.ConnString) ([]strin
 			origHostname = origHost[:idx]
 		}
 		originalHostsList = append(originalHostsList, origHostname)
-		// Extract base hostname pattern for matching (e.g., "prod-jesse-shard-00-00" from "prod-jesse-shard-00-00-pri.wucdt.gcp.mongodb.net")
+		// Extract base hostname pattern for matching (e.g., "cluster-shard-00-00" from "cluster-shard-00-00-pri.example.gcp.mongodb.net")
 		if strings.Contains(origHostname, "-pri") {
 			// Extract pattern before -pri
 			if idx := strings.Index(origHostname, "-pri"); idx > 0 {
 				baseHost := origHostname[:idx]
-				// Also try matching without the domain prefix (e.g., just "prod-jesse-shard-00-00")
+				// Also try matching without the domain prefix (e.g., just "cluster-shard-00-00")
 				domainIdx := strings.Index(baseHost, ".")
 				if domainIdx > 0 {
 					baseHostNoDomain := baseHost[:domainIdx]
@@ -118,20 +118,20 @@ func GetAllServerURIs(shards []Shard, connString connstring.ConnString) ([]strin
 			// Try to match with original hosts and preserve -pri suffix for Atlas
 			matched := false
 			if len(originalHostsMap) > 0 || len(originalHostsList) > 0 {
-				// Extract shard identifier pattern (e.g., "prod-jesse-shard-00-00" from various formats)
-				// Handle cases like "prod-jesse-shard-00-00.wucdt.gcp.mongodb.net" or "prod-jesse-shard-00-00-wucdt.gcp.mongodb.net"
+				// Extract shard identifier pattern (e.g., "cluster-shard-00-00" from various formats)
+				// Handle cases like "cluster-shard-00-00.example.gcp.mongodb.net" or "cluster-shard-00-00-example.gcp.mongodb.net"
 				baseParts := strings.Split(hostname, ".")
 				var shardID string
 				if len(baseParts) > 0 {
 					firstPart := baseParts[0]
-					// Extract shard identifier (e.g., "prod-jesse-shard-00-00" from "prod-jesse-shard-00-00-wucdt")
+					// Extract shard identifier (e.g., "cluster-shard-00-00" from "cluster-shard-00-00-example")
 					if strings.Contains(firstPart, "-shard-") {
-						// Remove domain suffixes like "-wucdt", "-pri", "-sec" for matching
+						// Remove domain suffixes like "-example", "-pri", "-sec" for matching
 						re := strings.NewReplacer("-wucdt", "", "-pri", "", "-sec", "")
 						cleaned := re.Replace(firstPart)
 						if idx := strings.Index(cleaned, "-shard-"); idx > 0 {
 							afterShard := cleaned[idx+7:]
-							// Extract shard ID (e.g., "prod-jesse-shard-00-00" from "prod-jesse-shard-00-00-wucdt")
+							// Extract shard ID (e.g., "cluster-shard-00-00" from "cluster-shard-00-00-example")
 							if len(afterShard) >= 5 && strings.Contains(afterShard[:5], "-") {
 								shardID = cleaned[:idx+7+5]
 							} else {
@@ -152,7 +152,7 @@ func GetAllServerURIs(shards []Shard, connString connstring.ConnString) ([]strin
 					} else {
 						// Try to find a similar hostname in original list by pattern matching
 						for _, origHost := range originalHostsList {
-							// Extract base from original (e.g., "prod-jesse-shard-00-00" from "prod-jesse-shard-00-00-pri.wucdt.gcp.mongodb.net")
+							// Extract base from original (e.g., "cluster-shard-00-00" from "cluster-shard-00-00-pri.example.gcp.mongodb.net")
 							origBase := origHost
 							if idx := strings.Index(origHost, "-pri"); idx > 0 {
 								origBase = origHost[:idx]

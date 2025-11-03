@@ -50,6 +50,7 @@ func Run(fullVersion string) {
 	explain := flag.String("explain", "", "explain a query from a JSON doc or a log line")
 	file := flag.String("file", "", "template file for seedibg data")
 	ftdcOn := flag.Bool("ftdc", false, "download from atlas://user:key@group/cluster")
+	html := flag.Bool("html", false, "generate HTML report with -allinfo")
 	index := flag.String("index", "", "get indexes info")
 	info := flag.String("info", "", "database connection string (Atlas uses atlas://user:key)")
 	loginfo := flag.Bool("loginfo", false, "log performance analytic from file or Atlas")
@@ -231,6 +232,7 @@ func Run(fullVersion string) {
 		stats.SetRedaction(*redaction)
 		stats.SetVerbose(*verbose)
 		stats.SetFastMode(fastMode)
+		stats.SetHTML(*html)
 		if err = stats.GetClusterStats(client, connString); err != nil {
 			log.Fatalf("a valid user with roles 'clusterMonitor' and 'readAnyDatabase' on all mongo processes are required.\n%v", err)
 		}

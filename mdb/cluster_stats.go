@@ -50,6 +50,7 @@ type ClusterStats struct {
 	redact    bool
 	signature string
 	verbose   bool
+	html      bool
 }
 
 // NewClusterStats returns *ClusterStats
@@ -76,6 +77,11 @@ func (p *ClusterStats) SetRedaction(redact bool) {
 // SetVerbose sets verbose mode
 func (p *ClusterStats) SetVerbose(verbose bool) {
 	p.verbose = verbose
+}
+
+// SetHTML sets HTML output mode
+func (p *ClusterStats) SetHTML(html bool) {
+	p.html = html
 }
 
 // GetClusterStats collects cluster stats
@@ -324,5 +330,22 @@ func (p *ClusterStats) OutputBSON() (string, []byte, error) {
 		return ofile, data, err
 	}
 	fmt.Printf("bson data written to %v\n", ofile)
+
+	// Generate HTML report if requested
+	if p.html {
+		// restore full database/collection details for HTML generation
+		fullDatabases := databases
+		summaryDatabases := p.Databases
+		p.Databases = fullDatabases
+		htmlGen := NewHTMLGenerator(p.signature)
+		if htmlFile, err := htmlGen.GenerateClusterHTML(p); err != nil {
+			p.Logger.Errorf("Failed to generate HTML report: %v", err)
+		} else {
+			p.Logger.Infof("HTML report generated: %v", htmlFile)
+		}
+		// set back to summaries to keep memory small for callers
+		p.Databases = summaryDatabases
+	}
+
 	return ofile, buffer.Bytes(), err
 }

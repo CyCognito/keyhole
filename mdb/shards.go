@@ -75,16 +75,151 @@ func GetAllServerURIs(shards []Shard, connString connstring.ConnString) ([]strin
 	if strings.HasPrefix(connString.String(), "mongodb+srv") {
 		isSRV = true
 	}
+	// Try to preserve Atlas hostname format by checking original connection string hosts
+	originalHostsMap := make(map[string]string)
+	originalHostsList := []string{}
+	for _, origHost := range connString.Hosts {
+		// Store original hostname without port for matching
+		origHostname := origHost
+		if idx := strings.Index(origHost, ":"); idx > 0 {
+			origHostname = origHost[:idx]
+		}
+		originalHostsList = append(originalHostsList, origHostname)
+		// Extract base hostname pattern for matching (e.g., "cluster-shard-00-00" from "cluster-shard-00-00-pri.example.gcp.mongodb.net")
+		if strings.Contains(origHostname, "-pri") {
+			// Extract pattern before -pri
+			if idx := strings.Index(origHostname, "-pri"); idx > 0 {
+				baseHost := origHostname[:idx]
+				// Also try matching without the domain prefix (e.g., just "cluster-shard-00-00")
+				domainIdx := strings.Index(baseHost, ".")
+				if domainIdx > 0 {
+					baseHostNoDomain := baseHost[:domainIdx]
+					originalHostsMap[baseHostNoDomain] = origHostname
+				}
+				originalHostsMap[baseHost] = origHostname
+			}
+		}
+	}
+
 	for _, shard := range shards {
 		idx := strings.Index(shard.Host, "/")
-		hosts := strings.Split(shard.Host[idx+1:], ",")
+		setName := shard.Host[:idx]
+		allHosts := shard.Host[idx+1:]
+		hosts := strings.Split(allHosts, ",")
 		for _, host := range hosts {
+			// Extract hostname and port
+			hostname := host
+			port := ""
+			if idx := strings.Index(host, ":"); idx > 0 {
+				hostname = host[:idx]
+				port = host[idx:]
+			}
+			
+			// Try to match with original hosts and preserve -pri suffix for Atlas
+			matched := false
+			if len(originalHostsMap) > 0 || len(originalHostsList) > 0 {
+				// Extract shard identifier pattern (e.g., "cluster-shard-00-00" from various formats)
+				// Handle cases like "cluster-shard-00-00.example.gcp.mongodb.net" or "cluster-shard-00-00-example.gcp.mongodb.net"
+				baseParts := strings.Split(hostname, ".")
+				var shardID string
+				if len(baseParts) > 0 {
+					firstPart := baseParts[0]
+					// Extract shard identifier (e.g., "cluster-shard-00-00" from "cluster-shard-00-00-example")
+					if strings.Contains(firstPart, "-shard-") {
+						// Remove domain suffixes like "-example", "-pri", "-sec" for matching
+						re := strings.NewReplacer("-wucdt", "", "-pri", "", "-sec", "")
+						cleaned := re.Replace(firstPart)
+						if idx := strings.Index(cleaned, "-shard-"); idx > 0 {
+							afterShard := cleaned[idx+7:]
+							// Extract shard ID (e.g., "cluster-shard-00-00" from "cluster-shard-00-00-example")
+							if len(afterShard) >= 5 && strings.Contains(afterShard[:5], "-") {
+								shardID = cleaned[:idx+7+5]
+							} else {
+								shardID = cleaned
+							}
+						} else {
+							shardID = cleaned
+						}
+					} else {
+						shardID = firstPart
+					}
+					
+					// Check if we have a matching original host with -pri
+					if origHost, ok := originalHostsMap[shardID]; ok {
+						// Use original hostname format
+						hostname = origHost
+						matched = true
+					} else {
+						// Try to find a similar hostname in original list by pattern matching
+						for _, origHost := range originalHostsList {
+							// Extract base from original (e.g., "cluster-shard-00-00" from "cluster-shard-00-00-pri.example.gcp.mongodb.net")
+							origBase := origHost
+							if idx := strings.Index(origHost, "-pri"); idx > 0 {
+								origBase = origHost[:idx]
+							}
+							if dotIdx := strings.Index(origBase, "."); dotIdx > 0 {
+								origBase = origBase[:dotIdx]
+							}
+							// Extract shard ID from original too
+							origShardID := origBase
+							if strings.Contains(origBase, "-shard-") {
+								re := strings.NewReplacer("-wucdt", "", "-pri", "", "-sec", "")
+								cleaned := re.Replace(origBase)
+								if idx := strings.Index(cleaned, "-shard-"); idx > 0 {
+									afterShard := cleaned[idx+7:]
+									if len(afterShard) >= 5 && strings.Contains(afterShard[:5], "-") {
+										origShardID = cleaned[:idx+7+5]
+									} else {
+										origShardID = cleaned
+									}
+								}
+							}
+							// If shard IDs match, use the original format
+							if origShardID == shardID {
+								hostname = origHost
+								matched = true
+								break
+							}
+						}
+					}
+				}
+			}
+			
+			// If no match found, try to add -pri suffix for Atlas hostnames
+			if !matched && strings.Contains(hostname, "-shard-") && strings.Contains(hostname, ".gcp.mongodb.net") {
+				// Check if -pri is missing and add it before the first dot
+				if !strings.Contains(hostname, "-pri") {
+					// Insert -pri before the domain segment (before first dot)
+					// But first, remove any domain suffix from the first part (e.g., "-wucdt")
+					parts := strings.Split(hostname, ".")
+					if len(parts) > 0 {
+						firstPart := parts[0]
+						// Remove domain suffixes like "-wucdt" from the first part
+						re := strings.NewReplacer("-wucdt", "")
+						cleanedFirst := re.Replace(firstPart)
+						// Reconstruct with -pri inserted before the first dot
+						hostname = cleanedFirst + "-pri." + strings.Join(parts[1:], ".")
+					} else if dotIdx := strings.Index(hostname, "."); dotIdx > 0 {
+						hostname = hostname[:dotIdx] + "-pri" + hostname[dotIdx:]
+					}
+				}
+			}
+			
+			// Reconstruct host with port if it was present
+			finalHost := hostname
+			if port != "" {
+				finalHost = hostname + port
+			}
+			
 			ruri := "mongodb://"
 			if connString.Username != "" {
-				ruri += fmt.Sprintf(`%v:%v@%v/?connect=direct&`, connString.Username, url.QueryEscape(connString.Password), host)
+				ruri += fmt.Sprintf(`%v:%v@%v/?`, connString.Username, url.QueryEscape(connString.Password), finalHost)
 			} else {
-				ruri += fmt.Sprintf(`%v/?connect=direct&`, host)
+				ruri += fmt.Sprintf(`%v/?`, finalHost)
 			}
+			// Include replica set name for proper replica set discovery
+			// The driver will discover other members from this single host
+			ruri += fmt.Sprintf(`replicaSet=%v&`, setName)
 			if isSRV {
 				ruri += "authSource=admin&tls=true"
 			} else {
